@@ -1,0 +1,11 @@
+
+.ipynb_checkpoints
+arquivado
+anotacoes
+estudar.pdf
+
+cripto_bot/.idea
+cripto_bot/.ipynb_checkpoints
+cripto_bot/__pycache__
+
+venv/
