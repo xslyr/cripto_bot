@@ -1,7 +1,7 @@
 import sqlite3
 from enum import Enum
 import pandas as pd
-from typing import List, Tuple
+from typing import List, Tuple, Dict, Union
 from .logger import RegistrarLog
 
 k = Enum('keywords',['int','float','str','text','key','not_null'])
@@ -154,36 +154,32 @@ class DataBase(object):
             RegistrarLog(e)
 
 
-    def insert_info(self, table: str, dictionary: dict):
-        columns, values = '', ''
-        for item in dictionary:
-            columns += str(item) + ','
-            values += ':'+str(item) + ','
+    def insert_info(self, table: str, data: Union[Dict, Tuple]):
         try:
-            conn = self.conn
-            cur = conn.cursor()
-            command = f'INSERT INTO {table} ({columns[:-1]}) VALUES ({values[:-1]})'
-            if self.logtask: RegistrarLog('insert_info: '+str(command))
-            cur.execute(command, dictionary)
-            conn.commit()
-            conn.close()
-            return True
-        except Exception as e:
-            RegistrarLog(e)
-            return False
+            if isinstance(data, Dict):
+                columns, values = '', ''
+                for item in data:
+                    columns += str(item) + ','
+                    values += ':'+str(item) + ','
+                conn = self.conn
+                cur = conn.cursor()
+                command = f'INSERT INTO {table} ({columns[:-1]}) VALUES ({values[:-1]})'
+                if self.logtask: RegistrarLog('insert_info: '+str(command))
+                cur.execute(command, data)
+                conn.commit()
+                conn.close()
+                return True
+            else:
+                values = '?,' * len(data)
+                conn = self.conn
+                cur = conn.cursor()
+                command = f'INSERT INTO {table} VALUES ({values[:-1]})'
+                if self.logtask: RegistrarLog('insert_info: ' + str(command))
+                cur.execute(command, data)
+                conn.commit()
+                conn.close()
+                return True
 
-
-    def insert_info(self, table: str, tuple: tuple):
-        values = '?,'*len(tuple)
-        try:
-            conn = self.conn
-            cur = conn.cursor()
-            command = f'INSERT INTO {table} VALUES ({values[:-1]})'
-            if self.logtask: RegistrarLog('insert_info: '+str(command))
-            cur.execute(command, tuple)
-            conn.commit()
-            conn.close()
-            return True
         except Exception as e:
             RegistrarLog(e)
             return False

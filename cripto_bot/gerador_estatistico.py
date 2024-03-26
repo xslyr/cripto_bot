@@ -1,5 +1,4 @@
-import itertools
-
+import itertools, time
 import pandas as pd
 import pandas_ta as ta
 from enum import Enum
@@ -10,6 +9,7 @@ from .logger import RegistrarLog
 
 class Estatisticas(Enum):
 	PADRAO = 'self._retornar_monitor(tempo=\'{}\', formato=\'{}\', {})'
+	ULTIMOS_DADOS = 'self._ultimos_dados(tempo=\'{}\', formato=\'{}\', {})'
 	VOLUME = 'self._calcular_volumes( tempo=\'{}\', formato=\'{}\', {} )'
 	STD_ROLL = 'self._calcular_stdroll( tempo=\'{}\', formato=\'{}\', {} )'
 	STD_INNER = 'self._calcular_stdinner( tempo=\'{}\', formato=\'{}\', {} )'
@@ -17,7 +17,6 @@ class Estatisticas(Enum):
 	RSI = 'self._calcular_rsi( tempo=\'{}\', formato=\'{}\', {})'
 	STOCHRSI = 'self._calcular_stochrsi( tempo=\'{}\', formato=\'{}\', {})'
 	MACD = 'self._calcular_macd( tempo=\'{}\', formato=\'{}\', {})'
-	ANIMUS = 'self._calcular_animus( tempo=\'{}\', formato=\'{}\', {})'
 
 
 class Gerador_Estatistico:
@@ -28,10 +27,11 @@ class Gerador_Estatistico:
 		if conexao is not None:
 			self.conexao = conexao
 			self._monitor = conexao.ticker_monitor
-		elif monitor_auxiliar is not None:
-			self._monitor = monitor_auxiliar
 		else:
-			raise Exception('É necessário um objeto de conexão binance ou um monitor auxilar para que o Gerador Estatístico opere.')
+			raise Exception('É necessário um objeto de conexão binance.')
+
+		while len(conexao.last_data)==0:
+			time.sleep(1)
 
 	def get_all_stats(self, tempo:list=['1m'], formato:str='dataframe', lista_configuracoes:List[Tuple[Estatisticas,str]]=[]):
 		"""
@@ -56,7 +56,7 @@ class Gerador_Estatistico:
 
 		return retorno
 
-	def get_data(self, funcao:Estatisticas, tempo_grafico:str, formato:str, configuracoes:str='', **kwargs ):
+	def get_data(self, funcao:Estatisticas, tempo_grafico:str, formato:str, configuracoes:str=''):
 		"""
 		:param funcao: Enum da classe Estatisticas a qual nos retornará as opções de cálculos disponíveis.
 		:param tempo_grafico: Tempo gráfico a onde será aplicado os cálculos. Este valor deve coincidir com a chave do dicionário monitor.
@@ -100,11 +100,11 @@ class Gerador_Estatistico:
 	def _ultimos_dados(self, tempo, formato, **kwargs):
 		if self.conexao == None: raise Exception('Para resgatar os últimos dados é necessário informar uma conexão ao criar a classe Gerador Estatístico')
 		if formato == 'dataframe':
-			aux = pd.DataFrame(self.conexao._last_data[tempo])
-			aux.index = [ datetime.fromtimestamp(self.conexao._last_data[tempo]['opentime']/1000) ]
+			aux = pd.DataFrame(self.conexao.last_data[tempo])
+			aux.index = [ datetime.fromtimestamp(self.conexao.last_data[tempo]['opentime']/1000) ]
 			aux.index.name = 'index'
 			return aux
-		else: self.conexao._last_data[tempo]
+		else: return self.conexao.last_data[tempo]
 
 # Volume ***************************************************************************************************************
 	def _calcular_volumes(self, tempo, formato, **kwargs):
@@ -138,10 +138,10 @@ class Gerador_Estatistico:
 
 		if isinstance(window, List):
 			for periodo in window:
-				column_name = f'rsi_{target}_{periodo}p'
+				column_name = f'{periodo}p'
 				aux[column_name] = ta.rsi(aux[target], length=periodo).fillna(0)
 		else:
-			column_name = f'rsi_{target}_{window}p'
+			column_name = f'{window}p'
 			aux[column_name] = ta.rsi(aux[target], length=window).fillna(0)
 
 		if formato=='dataframe': return pd.DataFrame(aux.iloc[:,1:])
@@ -161,8 +161,8 @@ class Gerador_Estatistico:
 
 		# 'k' é a linha mais sensível, 'd' a mais suave
 		for item in list(itertools.product(*combinacoes_parametros)):
-			column_name = [f'stochrsi_k_{item[0]}.{item[1]}.{item[2]}',
-						   f'stochrsi_d_{item[0]}.{item[1]}.{item[2]}']
+			column_name = [f'stochrsi_k',
+						   f'stochrsi_d']
 			aux[column_name] = ta.momentum.stochrsi(aux[target], length=length, rsi_length=item[0], k=item[1], d=item[2], fillna=0)
 
 		if formato=='dataframe': return pd.DataFrame(aux.iloc[:,1:])
@@ -177,10 +177,10 @@ class Gerador_Estatistico:
 
 		if isinstance(window, List ):
 			for periodo in window:
-				column_name = f'sma_{target}_{periodo}p'
+				column_name = f'{periodo}p'
 				aux[column_name] = aux[target].rolling(min_periods=0, window=periodo).mean()
 		else:
-			column_name = f'sma_{target}_{window}p'
+			column_name = f'{window}p'
 			aux[column_name] = aux[target].rolling(min_periods=0, window=window).mean()
 
 		if formato=='dataframe': return pd.DataFrame(aux.iloc[:,1:])
@@ -200,9 +200,7 @@ class Gerador_Estatistico:
 
 		# 'macd' é a linha mais sensível, 'sign' a mais suave e 'hist' o gráfico de barras ao fundo.
 		for item in itertools.product(*combinacoes_parametros):
-			column_name = [f'macd_{str(item[0])}.{str(item[1])}.{str(item[2])}',
-						   f'hist_{str(item[0])}.{str(item[1])}.{str(item[2])}',
-						   f'sign_{str(item[0])}.{str(item[1])}.{str(item[2])}']
+			column_name = ['macd','hist','sign']
 			aux[column_name] = ta.macd(aux[target], fast=item[0], slow=item[1], signal=item[2]).fillna(0)
 
 		if formato=='dataframe': return pd.DataFrame(aux.iloc[:,1:])
@@ -228,7 +226,7 @@ class Gerador_Estatistico:
 
 		if isinstance(window, List):
 			for period in window:
-				column_name = f'std_{target}_{period}p'
+				column_name = f'{period}p'
 				if target == 'taker/maker' or target == 'maker_asset_volume':
 					aux['maker_asset_volume'] = aux['base_asset_volume'] - aux['taker_asset_volume']
 					aux['taker/maker'] = aux['taker_asset_volume'] / aux['maker_asset_volume']
@@ -236,7 +234,7 @@ class Gerador_Estatistico:
 				else:
 					aux[column_name] = aux[target].rolling(min_periods=0, window=period).std()
 		else:
-			column_name = f'std_{target}_{window}p'
+			column_name = f'{window}p'
 			if target == 'taker/maker' or target == 'maker_asset_volume':
 				aux['maker_asset_volume'] = aux['base_asset_volume'] - aux['taker_asset_volume']
 				aux['taker/maker'] = aux['taker_asset_volume'] / aux['maker_asset_volume']
@@ -252,48 +250,12 @@ class Gerador_Estatistico:
 	def _calcular_stdinner(self, tempo, formato, **kwargs):
 		aux = self.monitor[tempo][['open','high','low','close']].copy()
 
-		column_name='std_inner'
+		column_name='std'
 		aux[column_name] = aux.std(axis=1)
 
 		if formato=='dataframe': return aux[column_name]
 		else: return aux[column_name].iloc[-1].to_dict()
 
 
-# Animus ****************************************************************************************************************
-
-	def _calcular_animus(self, tempo, formato, **kwargs):
-		'''
-		:param tempo: Tempo gráfico presente no monitor o qual será usado para os cálculos.
-		:param formato: Formato de retorno dos dados.
-		:param kwargs:
-			window: Define a quantidade de períodos que será usado para o cálculo do momentum e deviation.
-					O valor padrão é 21.
-		:return:
-		'''
-		def _anima(row):
-			return (row['close'] - row['low']) * row['taker%'] * row['base_asset_volume'] - (
-						row['high'] - row['close']) * row['maker%'] * row['base_asset_volume']
-
-		aux = self.monitor[tempo][['open', 'close', 'high', 'low', 'base_asset_volume', 'taker_asset_volume']].copy()
-		window = kwargs.get('window', 21)
-
-		if formato == 'dataframe': column_name = ['animus_score','animus_momentum','animus_deviation']
-		else: column_name = ['score','momentum','deviation']
-
-		aux['taker%'] = aux['taker_asset_volume'] / aux['base_asset_volume']
-		aux['maker%'] = 1 - aux['taker%']
-		aux[ column_name[0] ] = aux.apply(_anima, axis=1)
-		aux[ column_name[1] ] = aux[ column_name[0] ].rolling(min_periods=0, window=window).mean().fillna(0)
-		aux[ column_name[2] ] = aux[column_name[0]].rolling(min_periods=0, window=window).std().fillna(0)
-
-		if formato=='dataframe': return aux[column_name]
-		else: return aux[column_name].iloc[-1].to_dict()
-	
-	
-		
-		
-		
-		
-		
 		
 		

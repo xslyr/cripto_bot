@@ -1,115 +1,111 @@
 import asyncio
 from abc import ABC, abstractmethod
 from typing import Type
-
 import pandas as pd
+
 from .conector_bd import DataBase
 from .logger import RegistrarLog
 from .gerador_estatistico import Gerador_Estatistico, Estatisticas
-from sklearn.ensemble import GradientBoostingRegressor, ExtraTreesRegressor, HistGradientBoostingRegressor
-from xgboost import XGBRegressor
-from lightgbm import LGBMRegressor
+from enum import Enum
 
-# TODO: Implementar urgente uma trava many-loss pra ser usada em períodos de teste da estratégia
-# TODO: Cadastrar estratégia na tabela de estratégias do banco de dados
+
+class TradePosition(Enum):
+    OutMarket = 0
+    InMarket = 1
 
 class Estrategia(ABC):
+
+	def set_position(self, value: TradePosition): self.position = value
+	def set_orderpair(self, value: int): self.orderpair = value
+	def set_quantity(self, value:float): self.quantity = value
+	def set_min_quantity(self, gerador:Gerador_Estatistico): self.money_to_trade/float(gerador.conexao.last_data['close'])
+
+	def get_id(self): return self.id
+	def get_position(self): return self.position
+	def get_orderpair(self): return self.orderpair
+	def get_quantity(self): return self.quantity
+
+
 	@abstractmethod
 	def verificar_condicoes(self, gerador:Gerador_Estatistico): pass
 
 
+
 # ************************* Estrategia_MACRSI *************************
-class Estrategia_MACRSI(Estrategia):
+class Estrategia_SMAC(Estrategia):
 	
-	def __init__(self):
+	def __init__(self, money_to_trade):
 		self.id = 1
 		self.nome = 'MACRSI'
 		self.LOGTASK = True
-		self.position = 0
+		self.position = TradePosition.OutMarket
+		self.orderpair = None
+		self.qty = None
+		self.money_to_trade = money_to_trade
 
 
 	def verificar_condicoes(self, gerador:Gerador_Estatistico):
 
-		# TODO: D0011 : abstrair o tempo e formato para os parâmetros da funcao, após criar o mecanismo D0010
 		timeview, response_format, action = '1m', 'dict', 'WAIT'
 
 		volume = gerador.get_data( Estatisticas.VOLUME, timeview, response_format)
-		rsi = gerador.get_data( Estatisticas.RSI,timeview, response_format, 'window=[3,7]')
+		sma = gerador.get_data( Estatisticas.SMA, timeview, response_format, 'window=[3,9]')
 		macd = gerador.get_data( Estatisticas.MACD, timeview, response_format, 'fast=3, slow=11, signal=9')
 
 		# buy conditions
-		if self.position == 1 and (rsi['7p'] > 50 and rsi['7p'] > rsi['3p'] and macd['hist'] <= 0.5):
-			if self.LOGTASK: RegistrarLog(f'Estrategia:{self.nome}: SELL: rsi{rsi}, macd: {macd}, volume: {volume}')
-			self.position, action = 0, 'SELL'
+		if self.position == TradePosition.OutMarket and (sma['9p'] > sma['3p'] and macd['sign'] > 0):
+			if self.LOGTASK: RegistrarLog(f'Estrategia:{self.nome}: SELL: sma{sma}, macd: {macd}, volume: {volume}')
+			self.set_min_quantity(gerador)
+			action = 'BUY'
 
 		# sell conditions
-		if self.position == 0 and (rsi['7p'] < 50 and rsi['3p'] > rsi['7p'] and (macd['hist'] >= 0 or volume['taker/maker'] >= 2.5)):
-			if self.LOGTASK: RegistrarLog(f'Estrategia:{self.nome}: BUY: rsi{rsi}, macd: {macd}, volume: {volume}')
-			self.position, action = 1, 'BUY'
+		if self.position == TradePosition.InMarket and (sma['3p'] > sma['9p'] and (macd['sign'] < 0 or volume['taker/maker'] >= 2.5)):
+			if self.LOGTASK: RegistrarLog(f'Estrategia:{self.nome}: BUY: sma{sma}, macd: {macd}, volume: {volume}')
+			self.set_quantity(0)
+			action = 'SELL'
 
 		return action
 
-class Estrategia_AIMix(Estrategia):
-	_regressor = None
 
-	def __init__(self):
+class Estrategia_Exemplo(Estrategia):
+	def __init__(self, money_to_trade):
+		# id e nome será utilizada no momento de guardar as informações sobre a performance das estratégias
 		self.id = 2
-		self.nome = 'AIMix'
+		self.nome = 'Exemplo'
+
+		# a variavel logtask é usada para controlar se a classe como um irá guardar log no arquivo de texto
 		self.LOGTASK = True
-		self.position = 0
-		self.models = {}
 
-
-	async def model_fit(self, funcao: Type, x: pd.DataFrame, y: pd.DataFrame = None, size_prediction: int = -1, params:dict= {}):
-		if not any([ funcao.__name__ == modelo for modelo in self.models.keys() ]):
-			self.models[funcao.__name__] = funcao(**params)
-			if y == None: y = x.pop('close')
-			self.models[funcao.__name__].fit( x.iloc[50:size_prediction], y.shift(-1).iloc[50:size_prediction] )
-		else:
-			if y == None: y = x.pop('close')
-			self.models[funcao.__name__].fit(x.iloc[50:size_prediction], y.shift(-1).iloc[50:size_prediction])
-
-
-	async def model_predict(self, funcao: Type, x: pd.DataFrame) -> float:
-		return self.models[funcao.__name__].predict(x.iloc[-1].values)
-
-	async def fit_all_models(self, model_params:dict, data_train:pd.DataFrame):
-		tasks = [ self.model_fit(m, data_train, model_params[m]) for m in model_params ]
-		await asyncio.gather( *tasks )
+		self.position = TradePosition.OutMarket # position indica se estamos dentro ou fora do mercado spot
+		self.orderpair = None # oderpair armazena o id da ordem de compra pra registrarmos a performance entre compra/venda como um par
+		self.qty = None # o qty guarda a quantidade de criptomoedas que está sendo negociada no trade aberto
+		self.money_to_trade = money_to_trade
 
 	def verificar_condicoes(self, gerador: Gerador_Estatistico):
-		tempo_grafico = '1m'
-		last_data = gerador.conexao.last_data[tempo_grafico]
-		if self._regressor == None:
-			conditions = 'ticker=\'{}\' and interval=\'{}\' order by opentime'.format(last_data['ticker'], last_data['interval'])
-			ticker_monitor = DataBase().get_table('single_monitor', conditions )
 
-			gerador_aux = Gerador_Estatistico(monitor_auxiliar = ticker_monitor)
-			configuracoes = [
-				(Estatisticas.PADRAO, 'drop=["ticker","interval","opentime","closetime"]'),
-				(Estatisticas.VOLUME, ''),
-				(Estatisticas.STD_ROLL, 'target="taker_asset_volume", window=[3,7,14,21]'),
-				(Estatisticas.STD_ROLL, 'target="open", window=[3,7,9]'),
-				(Estatisticas.STD_INNER, ''),
-				(Estatisticas.SMA, 'window=[3,7,9], target="open"'),
-				(Estatisticas.RSI, 'window=[3,7,9], target="open"'),
-				(Estatisticas.RSI, 'window=[3,7,9], target="high"'),
-				(Estatisticas.RSI, 'window=[3,7,9], target="low"'),
-				(Estatisticas.STOCHRSI, 'target="open", rsi_length=14, k=[3,5], d=[3,5]'),
-				(Estatisticas.MACD, 'taget="open", fast=3, slow=[11,13], signal=[7,9]')
-			]
-			x_train = gerador_aux.get_all_stats([tempo_grafico], 'dataframe', configuracoes)
-			model_params = {
-				GradientBoostingRegressor : {'random_state': 0, 'max_depth': None},
-				XGBRegressor : {},
-				ExtraTreesRegressor : {'random_state': 0},
-				LGBMRegressor : {'random_state': 0, 'force_col_wise': True},
-				HistGradientBoostingRegressor : {'random_state': 0}
-			}
+		# Aqui você utiliza o objeto gerador para recuperar o dado de análise técnica necessária a sua estratégia.
+		# Os dados disponíveis para ser recuperados estão em um enum chamado Estatisticas.
+		# O tempo_grafico deve ser 1 das chaves que está sendo carregada pelo conector binance.
 
-			asyncio.run( self.fit_all_models(model_params, x_train) )
+		exemplo_sma = gerador.get_data( Estatisticas.SMA, tempo_grafico='1m', formato='dict', configuracoes='window=[3,7]')
 
-		else:
-			# resgatar parte do tickermonitor, agregar o last data, calcular o ultimo x_train pra prever o proximo close
-			# combinar com outros calculos para estimar a acao de compra ou venda
-			pass
+		# No exemplo acima carregamos em formato de dicionario o SMA( Simple Moving Average = Média Móvel Simples) do tempo gráfico 1 minuto.
+		# É importante lembrar que há também disponível o formato dataframe, o que facilitará utilizar esses dados com algoritmos de IA por exemplo.
+
+		# O intuito geral desse método é retornar para o Acionador_Estrategia a informação se irá comprar, vender ou nenhuma delas.
+		action = 'WAIT'
+
+		# É impressindível que ao retornar 'BUY' a quantidade de criptomoedas seja definida.
+		# Caso deseje operar com a quantidade definida em money_to_trade, basta chamar o método set_min_quantity passando gerador como parâmetro.
+		# Por exemplo:
+
+		if self.position == TradePosition.OutMarket and (exemplo_sma['7p'] > exemplo_sma['3p']):
+			self.set_min_quantity(gerador)
+			action = 'BUY'
+
+		if self.position == TradePosition.InMarket and (exemplo_sma['3p'] > exemplo_sma['7p']):
+			self.set_quantity(0)
+			action = 'SELL'
+
+		return action
+

@@ -51,11 +51,8 @@ class Conector_Binance:
         save_monitor: rotina para salvar os dados de cotacoes no banco de dados. O intuito de fazer isso é ter inputs para os modelos de predição.
 
     TODO:
-        - Conferir a chamada do widemonitor quando envolto em um while no jupyter.
         - Implementar o salvamento de parte do widemonitor no banco para o caso de reestartar aplicação rapidamente e já voltar em condições próximas.
         - Implementar outros intervalos gráficos para a rotina save_tickermonitor.
-        - Testar/Codificar um comportamento adequado ao websocket/salvamento no bd para o caso da internet cair.
-
     '''
 
     _ticker_monitor: dict = {}
@@ -97,7 +94,7 @@ class Conector_Binance:
             else:
                 prefix += '/{ticker}@kline_{time}'.format(ticker=ticker.lower(), time=intervals[0])
             URL += prefix
-            RegistrarLog(f'Url da conexao binance: {URL}')
+            #RegistrarLog(f'Url da conexao binance: {URL}')
             self.__tickersocket = BinanceWebsocketClient(stream_url=URL, on_message=self.__get_single)
 
         if save_data: self.save_monitor(monitor_type='ticker_monitor', ticker=ticker, interval=intervals[0],
@@ -172,8 +169,6 @@ class Conector_Binance:
             pass
 
     async def save_tickermonitor(self, ticker='BTCUSDT', interval='1m', websocket=False):
-
-
         try:
             now = round(datetime.now().timestamp() * 1000)
             data = self._ticker_monitor[interval]
@@ -185,7 +180,7 @@ class Conector_Binance:
             if DataBase().insert_many('single_monitor', tuples_to_insert):
                 last_opentime_registred = tuples_to_insert[-1][2]
             else:
-                raise Exception('Some error occured during save on database. The routine save_tickermonitor will quitting now.')
+                raise Exception('Some error occured on saving database. The routine save_tickermonitor will quitting now.')
 
             while websocket:
                 await asyncio.sleep(2)
@@ -197,7 +192,7 @@ class Conector_Binance:
                     if DataBase().insert_many('single_monitor', tuples_to_insert):
                         last_opentime_registred = tuples_to_insert[-1][2]
                     else:
-                        raise Exception('Some error occured during save on database. The routine save_tickermonitor will quitting now.')
+                        raise Exception('Some error occured on saving database. The routine save_tickermonitor will quitting now.')
 
         except Exception as e:
             RegistrarLog(e)

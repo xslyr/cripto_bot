@@ -1,20 +1,20 @@
 import time
-from typing import List,Dict
+from typing import List, Dict
 from .trader import TraderBinance
 from .estrategias import *
-from IPython.display import HTML, display, clear_output
+from IPython.display import HTML,display, clear_output
 
 
 class BasesAcionador(ABC):
 
 	@abstractmethod
-	def adicionar_estrategia(self, estrategia: Estrategia)->None: pass
+	def adicionar_estrategia(self, estrategia: Estrategia): pass
 
 	@abstractmethod
-	def remover_estrategia(self, estrategia: Estrategia)->None: pass
+	def remover_estrategia(self, estrategia: Estrategia): pass
 		
 	@abstractmethod
-	def notificar_estrategias(self)->None: pass
+	def notificar_estrategias(self): pass
 
 
 class Acionador_Estrategias(BasesAcionador):
@@ -25,7 +25,6 @@ class Acionador_Estrategias(BasesAcionador):
 	def __init__(self, gerador_estatistico: Gerador_Estatistico, operation_mode = 'livetest', **kwargs):
 		self.gerador_estatistico = gerador_estatistico
 		self.trader = TraderBinance(operation_mode)
-		self.order_pairs = {}
 
 		if len(gerador_estatistico.conexao.last_data) > 0:
 			tempos = [item for item in gerador_estatistico.conexao.last_data.keys()]
@@ -36,35 +35,35 @@ class Acionador_Estrategias(BasesAcionador):
 		for item in kwargs:
 			self._parametros_monitoramento[item] = kwargs[item]
 
-	def adicionar_estrategia(self, estrategia: Estrategia)->None:
+	def adicionar_estrategia(self, estrategia: Estrategia):
 		self._lista_estrategias.append(estrategia)
 	
-	def remover_estrategia(self, estrategia: Estrategia)->None:
+	def remover_estrategia(self, estrategia: Estrategia):
 		self._lista_estrategias.remove(estrategia)
 		
-	def notificar_estrategias(self)->None:
+	def notificar_estrategias(self):
 		for estrategia in self._lista_estrategias:
-			result = estrategia.verificar_condicoes(self.gerador_estatistico)
-			if result == 'BUY':
-				self.order_pairs[estrategia.id] = self.trader.buy(estrategia.id, 'BTCUSDT', self.lot_size)
-			elif result == 'SELL':
-				self.trader.sell( self.order_pairs[estrategia.id], 'BTCUSDT', self.lot_size )
+			action = estrategia.verificar_condicoes(self.gerador_estatistico)
+			if action == 'BUY': self.trader.buy(estrategia, 'BTCUSDT')
+			elif action == 'SELL': self.trader.sell( estrategia, 'BTCUSDT' )
 
 	def mostrar_paineis(self):
-		dados = [list(item.values()) for item in self.gerador_estatistico.conexao.last_data.values()]
-		self.painel_dados = pd.DataFrame( dados, columns=self.painel_dados.columns )
+		dados = []
+		for tempo in self.gerador_estatistico.conexao.last_data:
+			aux = {'interval': tempo}
+			aux.update(self.gerador_estatistico.conexao.last_data[tempo])
+			dados.append(aux)
 
-
+		self.painel_dados = pd.DataFrame( dados, columns=dados[0].keys() ).T
 		clear_output(wait=True)
 		display(self.painel_dados)
-		# TODO: montar um painel de posicoes com os nomes das estratégias e o status de cada 1
-		# TODO: montar um painel com histórico das ultimas ordens?
-
+		# TODO: montar um painel de posicoes com os nomes das estratégias e o status de cada 1, streamlit?
+		# TODO: acho conveniente montar um painel com histórico das ultimas ordens?
 
 	# TODO: D0010 : criar uma conexão entre a view do usuario e o acionador, para que eles escolham quais estrategias, tickers e quantidades usar
-	def executar_trades(self, lot_size:float):
-		self.adicionar_estrategia(Estrategia_MACRSI())
-		self.lot_size = lot_size
+
+	def executar_trades(self, money_to_trade:float=12.5):
+		self.adicionar_estrategia(Estrategia_SMAC(money_to_trade=money_to_trade))
 		while True:			
 			self.notificar_estrategias()
 			self.mostrar_paineis()
