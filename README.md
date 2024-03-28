@@ -10,6 +10,7 @@ Requisitos:
 ---
 
 Resumo da Estrutura: 
+
 	- O pacote conector_binance é responsável por trazer as informações da Binance e armazená-las em um dataframe.
 
 	- O gerador_estatistico é responsável por pegar os dados de um dataframe e realizar os cálculos de análise técnica.
